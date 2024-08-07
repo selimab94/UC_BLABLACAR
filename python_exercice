@@ -1,0 +1,92 @@
+import requests
+import sqlite3
+import pandas as pd
+import json
+import logging
+from datetime import datetime
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Base URL and endpoint
+base_url = "http://v0.ovapi.nl/"
+endpoint = "line/"
+
+# Fetch data from the API
+def fetch_data():
+    try:
+        response = requests.get(base_url + endpoint)
+        response.raise_for_status()  # Raise HTTPError for bad responses
+        data = response.json()
+        logging.info(f"Fetched {len(data)} records from API.")
+        return data
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error fetching data: {e}")
+        return {}
+
+data = fetch_data()
+
+def create_table():
+    conn = sqlite3.connect('transport_data.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS lines (
+        line_id TEXT PRIMARY KEY,
+        data TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    conn.commit()
+    conn.close()
+
+create_table()
+
+def save_data(data):
+    conn = sqlite3.connect('transport_data.db')
+    cursor = conn.cursor()
+    
+    for line_id, line_data in data.items():
+        line_json = json.dumps(line_data)
+        cursor.execute('''
+        INSERT OR REPLACE INTO lines (line_id, data)
+        VALUES (?, ?)
+        ''', (line_id, line_json))
+    
+    conn.commit()
+    conn.close()
+
+save_data(data)
+
+
+def create_partitioned_table():
+    conn = sqlite3.connect('transport_data.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS lines_partitioned (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        line_id TEXT,
+        data TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_line_id ON lines_partitioned (line_id)')
+    conn.commit()
+    conn.close()
+
+create_partitioned_table()
+
+def save_partitioned_data(data):
+    conn = sqlite3.connect('transport_data.db')
+    cursor = conn.cursor()
+    
+    for line_id, line_data in data.items():
+        line_json = json.dumps(line_data)
+        cursor.execute('''
+        INSERT INTO lines_partitioned (line_id, data)
+        VALUES (?, ?)
+        ''', (line_id, line_json))
+    
+    conn.commit()
+    conn.close()
+
+save_partitioned_data(data)
