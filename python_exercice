@@ -1,23 +1,37 @@
-import requests
-import sqlite3
-import pandas as pd
-import json
-import logging
-from datetime import datetime
+import requests  # Importing the requests module to make HTTP requests
+import sqlite3  # Importing sqlite3 to interact with SQLite databases
+import pandas as pd  # Importing pandas for data manipulation (not used in this code)
+import json  # Importing json to handle JSON data
+import logging  # Importing logging to enable logging of information and errors
+from datetime import datetime  # Importing datetime for date and time handling (not used in this code)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Setting up logging to record informational and error messages with a basic format
 
-# Base URL and endpoint
+# Base URL and endpoint for the API
 base_url = "http://v0.ovapi.nl/"
 endpoint = "line/"
+# Defining the base URL and endpoint for the API
 
 # Fetch data from the API
 def fetch_data():
+    """
+    Fetches data from the API.
+
+    This function sends a GET request to the API's endpoint to retrieve data
+    in JSON format. If the request is successful, the data is returned; otherwise,
+    an empty dictionary is returned and an error is logged.
+
+    Returns:
+        dict: The data retrieved from the API, or an empty dictionary if the request fails.
+    """
     try:
         response = requests.get(base_url + endpoint)
-        response.raise_for_status()  # Raise HTTPError for bad responses
-        data = response.json()
+        # Sending a GET request to the API to retrieve data
+        
+        response.raise_for_status()  # Raise an HTTPError for bad responses (4xx or 5xx)
+        data = response.json()  # Parsing the response as JSON
         logging.info(f"Fetched {len(data)} records from API.")
         return data
     except requests.exceptions.RequestException as e:
@@ -26,41 +40,74 @@ def fetch_data():
 
 data = fetch_data()
 
+# Create a table in SQLite database to store the data
 def create_table():
-    conn = sqlite3.connect('transport_data.db')
-    cursor = conn.cursor()
+    """
+    Creates a SQLite table named 'lines' if it does not exist.
+
+    The table has three columns:
+        - line_id: The primary key, a text field that stores the line ID.
+        - data: A text field that stores the JSON data as a string.
+        - created_at: A timestamp field that defaults to the current time.
+
+    This function ensures that the table exists before any data is inserted.
+    """
+    conn = sqlite3.connect('transport_data.db')  # Connecting to the SQLite database
+    cursor = conn.cursor()  # Creating a cursor object to execute SQL commands
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS lines (
         line_id TEXT PRIMARY KEY,
         data TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
-    ''')
-    conn.commit()
-    conn.close()
+    ''')  # Creating the 'lines' table if it doesn't exist
+    conn.commit()  # Committing the transaction to the database
+    conn.close()  # Closing the database connection
 
 create_table()
 
+# Save the fetched data into the SQLite table
 def save_data(data):
-    conn = sqlite3.connect('transport_data.db')
-    cursor = conn.cursor()
+    """
+    Saves data into the 'lines' table in the SQLite database.
+
+    This function inserts or replaces records in the 'lines' table with the data
+    fetched from the API. The data is stored as a JSON string.
+
+    Args:
+        data (dict): The data to be saved, with line IDs as keys and the corresponding
+                     JSON data as values.
+    """
+    conn = sqlite3.connect('transport_data.db')  # Connecting to the SQLite database
+    cursor = conn.cursor()  # Creating a cursor object to execute SQL commands
     
     for line_id, line_data in data.items():
-        line_json = json.dumps(line_data)
+        line_json = json.dumps(line_data)  # Converting the line data to a JSON string
         cursor.execute('''
         INSERT OR REPLACE INTO lines (line_id, data)
         VALUES (?, ?)
-        ''', (line_id, line_json))
+        ''', (line_id, line_json))  # Inserting or replacing the data into the 'lines' table
     
-    conn.commit()
-    conn.close()
+    conn.commit()  # Committing the transaction to the database
+    conn.close()  # Closing the database connection
 
 save_data(data)
 
-
+# Create a partitioned table in SQLite for storing data with an auto-increment ID
 def create_partitioned_table():
-    conn = sqlite3.connect('transport_data.db')
-    cursor = conn.cursor()
+    """
+    Creates a partitioned SQLite table named 'lines_partitioned' if it does not exist.
+
+    The table has four columns:
+        - id: An auto-incremented primary key.
+        - line_id: A text field that stores the line ID.
+        - data: A text field that stores the JSON data as a string.
+        - created_at: A timestamp field that defaults to the current time.
+
+    This function also creates an index on the 'line_id' column to improve query performance.
+    """
+    conn = sqlite3.connect('transport_data.db')  # Connecting to the SQLite database
+    cursor = conn.cursor()  # Creating a cursor object to execute SQL commands
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS lines_partitioned (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,25 +115,38 @@ def create_partitioned_table():
         data TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
-    ''')
+    ''')  # Creating the 'lines_partitioned' table if it doesn't exist
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_line_id ON lines_partitioned (line_id)')
-    conn.commit()
-    conn.close()
+    # Creating an index on the 'line_id' column to improve query performance
+    conn.commit()  # Committing the transaction to the database
+    conn.close()  # Closing the database connection
 
 create_partitioned_table()
 
+# Save the fetched data into the partitioned SQLite table
 def save_partitioned_data(data):
-    conn = sqlite3.connect('transport_data.db')
-    cursor = conn.cursor()
+    """
+    Saves data into the 'lines_partitioned' table in the SQLite database.
+
+    This function inserts records into the 'lines_partitioned' table with the data
+    fetched from the API. The data is stored as a JSON string. Each entry gets a unique
+    auto-incremented ID.
+
+    Args:
+        data (dict): The data to be saved, with line IDs as keys and the corresponding
+                     JSON data as values.
+    """
+    conn = sqlite3.connect('transport_data.db')  # Connecting to the SQLite database
+    cursor = conn.cursor()  # Creating a cursor object to execute SQL commands
     
     for line_id, line_data in data.items():
-        line_json = json.dumps(line_data)
+        line_json = json.dumps(line_data)  # Converting the line data to a JSON string
         cursor.execute('''
         INSERT INTO lines_partitioned (line_id, data)
         VALUES (?, ?)
-        ''', (line_id, line_json))
+        ''', (line_id, line_json))  # Inserting the data into the 'lines_partitioned' table
     
-    conn.commit()
-    conn.close()
+    conn.commit()  # Committing the transaction to the database
+    conn.close()  # Closing the database connection
 
 save_partitioned_data(data)
